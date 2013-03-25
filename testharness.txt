@@ -1,0 +1,18 @@
+LED strips will have clock/data line attached to the output pins of a pair of 1x16 mux's
+
+1x16 mux's data select lines attached to a 595
+
+clock line/data line and 595 clock line/data line attached to a set of: https://www.sparkfun.com/products/9907
+	one chip routing clock/data to the 1x16 mux inputs, the other chip routing clock/data to the 595 for mux selection
+
+master has lines going to the 9907's to switch which controller gets to play
+
+each controller has a pair of clock/data going to one 9907 for feeding to the mux's, and one pair for feeding to the 595's to select the mux
+
+-------
+
+controllers: 
+clock/data pairs - take 3-4 pairs of lines (same port software, different port software, hardware SPI, USART in SPI mode) run out as single pair for leds routed to 9907
+				   1 pair for software SPI to 595's for led chipset selection routed to 9907
+				   1 pair lines to master controller for comms
+

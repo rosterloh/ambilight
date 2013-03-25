@@ -65,32 +65,40 @@ public:
 	static __attribute__((always_inline)) inline uint8_t adjust(uint8_t data) { return data; } 
 };
 
+#define FLAG_START_BIT 0x80
+#define MASK_SKIP_BITS 0x3F
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 // Software SPI (aka bit-banging) support - with aggressive optimizations for when the clock and data pin are on the same port
 //
-// TODO: Replace the latch pin definition with a set of pins, to allow using mux hardware for routing in the future
+// TODO: Replace the select pin definition with a set of pins, to allow using mux hardware for routing in the future
 //
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <uint8_t DATA_PIN, uint8_t CLOCK_PIN, uint8_t LATCH_PIN, uint8_t SPI_SPEED>
+template <uint8_t DATA_PIN, uint8_t CLOCK_PIN, uint8_t SPI_SPEED>
 class AVRSoftwareSPIOutput { 
 	// The data types for pointers to the pin port - typedef'd here from the Pin definition because on avr these
 	// are pointers to 8 bit values, while on arm they are 32 bit
-	typedef typename Pin<DATA_PIN>::port_ptr_t data_ptr_t;
-	typedef typename Pin<CLOCK_PIN>::port_ptr_t clock_ptr_t;
+	typedef typename FastPin<DATA_PIN>::port_ptr_t data_ptr_t;
+	typedef typename FastPin<CLOCK_PIN>::port_ptr_t clock_ptr_t;
 
 	// The data type for what's at a pin's port - typedef'd here from the Pin definition because on avr the ports
 	// are 8 bits wide while on arm they are 32.
-	typedef typename Pin<DATA_PIN>::port_t data_t;
-	typedef typename Pin<CLOCK_PIN>::port_t clock_t;
+	typedef typename FastPin<DATA_PIN>::port_t data_t;
+	typedef typename FastPin<CLOCK_PIN>::port_t clock_t;
+	Selectable 	*m_pSelect;
+
 public:
-	static void init() {
-		// set the pins to output and make sure the latch is released (which apparently means hi?  This is a bit
+	AVRSoftwareSPIOutput() { m_pSelect = NULL; }
+	AVRSoftwareSPIOutput(Selectable *pSelect) { m_pSelect = pSelect; }
+	void setSelect(Selectable *pSelect) { m_pSelect = pSelect; }
+
+	void init() {
+		// set the pins to output and make sure the select is released (which apparently means hi?  This is a bit
 		// confusing to me)
-		Pin<DATA_PIN>::setOutput();
-		Pin<LATCH_PIN>::setOutput();
-		Pin<CLOCK_PIN>::setOutput();
+		FastPin<DATA_PIN>::setOutput();
+		FastPin<CLOCK_PIN>::setOutput();
 		release();
 	}
 
@@ -163,20 +171,20 @@ public:
 	// write the BIT'th bit out via spi, setting the data pin then strobing the clcok
 	template <uint8_t BIT> __attribute__((always_inline, hot)) inline static void writeBit(uint8_t b) { 
 		if(b & (1 << BIT)) { 
-			Pin<DATA_PIN>::hi();
+			FastPin<DATA_PIN>::hi();
 			if(SPI_SPEED < 3) { 
-				Pin<CLOCK_PIN>::strobe();
+				FastPin<CLOCK_PIN>::strobe();
 			} else { 
-				Pin<CLOCK_PIN>::hi(); SPI_DELAY;
-				Pin<CLOCK_PIN>::lo(); SPI_DELAY;
+				FastPin<CLOCK_PIN>::hi(); SPI_DELAY;
+				FastPin<CLOCK_PIN>::lo(); SPI_DELAY;
 			}
 		} else { 
-			Pin<DATA_PIN>::lo();
+			FastPin<DATA_PIN>::lo();
 			if(SPI_SPEED < 3) { 
-				Pin<CLOCK_PIN>::strobe();
+				FastPin<CLOCK_PIN>::strobe();
 			} else { 
-				Pin<CLOCK_PIN>::hi(); SPI_DELAY;
-				Pin<CLOCK_PIN>::lo(); SPI_DELAY;
+				FastPin<CLOCK_PIN>::hi(); SPI_DELAY;
+				FastPin<CLOCK_PIN>::lo(); SPI_DELAY;
 			}
 		}
 	}
@@ -185,13 +193,13 @@ private:
 	// write the BIT'th bit out via spi, setting the data pin then strobing the clock, using the passed in pin registers to accelerate access if needed
 	template <uint8_t BIT> __attribute__((always_inline)) inline static void writeBit(uint8_t b, clock_ptr_t clockpin, data_ptr_t datapin) { 
 		if(b & (1 << BIT)) { 
-			Pin<DATA_PIN>::hi(datapin);
-			Pin<CLOCK_PIN>::hi(clockpin); SPI_DELAY;
-			Pin<CLOCK_PIN>::lo(clockpin); SPI_DELAY;
+			FastPin<DATA_PIN>::hi(datapin);
+			FastPin<CLOCK_PIN>::hi(clockpin); SPI_DELAY;
+			FastPin<CLOCK_PIN>::lo(clockpin); SPI_DELAY;
 		} else { 
-			Pin<DATA_PIN>::lo(datapin);
-			Pin<CLOCK_PIN>::hi(clockpin); SPI_DELAY;
-			Pin<CLOCK_PIN>::lo(clockpin); SPI_DELAY;
+			FastPin<DATA_PIN>::lo(datapin);
+			FastPin<CLOCK_PIN>::hi(clockpin); SPI_DELAY;
+			FastPin<CLOCK_PIN>::lo(clockpin); SPI_DELAY;
 		}
 
 	}
@@ -202,14 +210,14 @@ private:
 													data_t hival, data_t loval, clock_t hiclock, clock_t loclock) { 
 		// // only need to explicitly set clock hi if clock and data are on different ports
 		if(b & (1 << BIT)) { 
-			Pin<DATA_PIN>::fastset(datapin, hival);
-			Pin<CLOCK_PIN>::fastset(clockpin, hiclock); SPI_DELAY;
-			Pin<CLOCK_PIN>::fastset(clockpin, loclock); SPI_DELAY;
+			FastPin<DATA_PIN>::fastset(datapin, hival);
+			FastPin<CLOCK_PIN>::fastset(clockpin, hiclock); SPI_DELAY;
+			FastPin<CLOCK_PIN>::fastset(clockpin, loclock); SPI_DELAY;
 		} else { 
 			// NOP;
-			Pin<DATA_PIN>::fastset(datapin, loval);
-			Pin<CLOCK_PIN>::fastset(clockpin, hiclock);
-			Pin<CLOCK_PIN>::fastset(clockpin, loclock);
+			FastPin<DATA_PIN>::fastset(datapin, loval);
+			FastPin<CLOCK_PIN>::fastset(clockpin, hiclock);
+			FastPin<CLOCK_PIN>::fastset(clockpin, loclock);
 		}
 	}
 
@@ -218,28 +226,32 @@ private:
 	template <uint8_t BIT> __attribute__((always_inline)) inline static void writeBit(uint8_t b, data_ptr_t clockdatapin, 
 													data_t datahiclockhi, data_t dataloclockhi, 
 													data_t datahiclocklo, data_t dataloclocklo) { 
+#if 0
+		writeBit<BIT>(b);
+#else
 		if(b & (1 << BIT)) { 
-			Pin<DATA_PIN>::fastset(clockdatapin, datahiclockhi); SPI_DELAY;
-			Pin<DATA_PIN>::fastset(clockdatapin, datahiclocklo); SPI_DELAY;
+			FastPin<DATA_PIN>::fastset(clockdatapin, datahiclocklo); SPI_DELAY;
+			FastPin<DATA_PIN>::fastset(clockdatapin, datahiclockhi); SPI_DELAY;
 		} else { 
 			// NOP;
-			Pin<DATA_PIN>::fastset(clockdatapin, dataloclockhi); SPI_DELAY;
-			Pin<DATA_PIN>::fastset(clockdatapin, dataloclocklo); SPI_DELAY;
+			FastPin<DATA_PIN>::fastset(clockdatapin, dataloclocklo); SPI_DELAY;
+			FastPin<DATA_PIN>::fastset(clockdatapin, dataloclockhi); SPI_DELAY;
 		}
+#endif
 	}
 public:
 
-	// latch the SPI output (TODO: research whether this really means hi or lo.  Alt TODO: move latch responsibility out of the SPI classes
-	// entirely, make it up to the caller to remember to lock/latch the line?)
-	static void latch() { Pin<LATCH_PIN>::lo(); }
+	// select the SPI output (TODO: research whether this really means hi or lo.  Alt TODO: move select responsibility out of the SPI classes
+	// entirely, make it up to the caller to remember to lock/select the line?)
+	void select() { if(m_pSelect != NULL) { m_pSelect->select(); } } // FastPin<SELECT_PIN>::hi(); }
 
 	// release the SPI line
-	static void release() { Pin<LATCH_PIN>::hi(); }
+	void release() { if(m_pSelect != NULL) { m_pSelect->release(); } } // FastPin<SELECT_PIN>::lo(); }
 
 	// Write out len bytes of the given value out over SPI.  Useful for quickly flushing, say, a line of 0's down the line.
-	static void writeBytesValue(uint8_t value, int len) { 
-		latch();
-#if 0
+	void writeBytesValue(uint8_t value, int len) { 
+		select();
+#ifdef FAST_SPI_INTERRUPTS_WRITE_PINS
 		// TODO: Weird things may happen if software bitbanging SPI output and other pins on the output reigsters are being twiddled.  Need
 		// to allow specifying whether or not exclusive i/o access is allowed during this process, and if i/o access is not allowed fall
 		// back to the degenerative code below
@@ -247,26 +259,26 @@ public:
 			writeByte(value);
 		}
 #else
-		register clock_ptr_t clockpin = Pin<CLOCK_PIN>::port();
-		register data_ptr_t datapin = Pin<DATA_PIN>::port();
+		register clock_ptr_t clockpin = FastPin<CLOCK_PIN>::port();
+		register data_ptr_t datapin = FastPin<DATA_PIN>::port();
 
-		if(Pin<DATA_PIN>::port() != Pin<CLOCK_PIN>::port()) {
+		if(FastPin<DATA_PIN>::port() != FastPin<CLOCK_PIN>::port()) {
 			// If data and clock are on different ports, then writing a bit will consist of writing the value foor
 			// the bit (hi or low) to the data pin port, and then two writes to the clock port to strobe the clock line
-			register data_t datahi = Pin<DATA_PIN>::hival();
-			register data_t datalo = Pin<DATA_PIN>::loval();
-			register clock_t clockhi = Pin<CLOCK_PIN>::hival();
-			register clock_t clocklo = Pin<CLOCK_PIN>::loval();
+			register data_t datahi = FastPin<DATA_PIN>::hival();
+			register data_t datalo = FastPin<DATA_PIN>::loval();
+			register clock_t clockhi = FastPin<CLOCK_PIN>::hival();
+			register clock_t clocklo = FastPin<CLOCK_PIN>::loval();
 			while(len--) { 
 				writeByte(value, clockpin, datapin, datahi, datalo, clockhi, clocklo);
 			}
 
 		} else {
 			// If data and clock are on the same port then we can combine setting the data and clock pins 
-			register data_t datahi_clockhi = Pin<DATA_PIN>::hival() | Pin<CLOCK_PIN>::mask();
-			register data_t datalo_clockhi = Pin<DATA_PIN>::loval() | Pin<CLOCK_PIN>::mask();
-			register data_t datahi_clocklo = Pin<DATA_PIN>::hival() & ~Pin<CLOCK_PIN>::mask();
-			register data_t datalo_clocklo = Pin<DATA_PIN>::loval() & ~Pin<CLOCK_PIN>::mask();
+			register data_t datahi_clockhi = FastPin<DATA_PIN>::hival() | FastPin<CLOCK_PIN>::mask();
+			register data_t datalo_clockhi = FastPin<DATA_PIN>::loval() | FastPin<CLOCK_PIN>::mask();
+			register data_t datahi_clocklo = FastPin<DATA_PIN>::hival() & ~FastPin<CLOCK_PIN>::mask();
+			register data_t datalo_clocklo = FastPin<DATA_PIN>::loval() & ~FastPin<CLOCK_PIN>::mask();
 
 			while(len--) { 
 				writeByte(value, datapin, datahi_clockhi, datalo_clockhi, datahi_clocklo, datalo_clocklo);
@@ -278,24 +290,24 @@ public:
 
 	// write a block of len uint8_ts out.  Need to type this better so that explicit casts into the call aren't required.
 	// note that this template version takes a class parameter for a per-byte modifier to the data. 
-	template <class D> static void writeBytes(register uint8_t *data, int len) { 
-		latch();
-#if 0
+	template <class D> void writeBytes(register uint8_t *data, int len) { 
+		select();
+#ifdef FAST_SPI_INTERRUPTS_WRITE_PINS
 		uint8_t *end = data + len;
 		while(data != end) { 
 			writeByte(D::adjust(*data++));
 		}
 #else
-		register clock_ptr_t clockpin = Pin<CLOCK_PIN>::port();
-		register data_ptr_t datapin = Pin<DATA_PIN>::port();
+		register clock_ptr_t clockpin = FastPin<CLOCK_PIN>::port();
+		register data_ptr_t datapin = FastPin<DATA_PIN>::port();
 
-		if(Pin<DATA_PIN>::port() != Pin<CLOCK_PIN>::port()) {
+		if(FastPin<DATA_PIN>::port() != FastPin<CLOCK_PIN>::port()) {
 			// If data and clock are on different ports, then writing a bit will consist of writing the value foor
 			// the bit (hi or low) to the data pin port, and then two writes to the clock port to strobe the clock line
-			register data_t datahi = Pin<DATA_PIN>::hival();
-			register data_t datalo = Pin<DATA_PIN>::loval();
-			register clock_t clockhi = Pin<CLOCK_PIN>::hival();
-			register clock_t clocklo = Pin<CLOCK_PIN>::loval();
+			register data_t datahi = FastPin<DATA_PIN>::hival();
+			register data_t datalo = FastPin<DATA_PIN>::loval();
+			register clock_t clockhi = FastPin<CLOCK_PIN>::hival();
+			register clock_t clocklo = FastPin<CLOCK_PIN>::loval();
 			uint8_t *end = data + len;
 
 			while(data != end) { 
@@ -303,38 +315,43 @@ public:
 			}
 
 		} else {
+			FastPin<CLOCK_PIN>::hi();
 			// If data and clock are on the same port then we can combine setting the data and clock pins 
-			register data_t datahi_clockhi = Pin<DATA_PIN>::hival() | Pin<CLOCK_PIN>::mask();
-			register data_t datalo_clockhi = Pin<DATA_PIN>::loval() | Pin<CLOCK_PIN>::mask();
-			register data_t datahi_clocklo = Pin<DATA_PIN>::hival() & ~Pin<CLOCK_PIN>::mask();
-			register data_t datalo_clocklo = Pin<DATA_PIN>::loval() & ~Pin<CLOCK_PIN>::mask();
+			register data_t datahi_clockhi = FastPin<DATA_PIN>::hival() | FastPin<CLOCK_PIN>::mask();
+			register data_t datalo_clockhi = FastPin<DATA_PIN>::loval() | FastPin<CLOCK_PIN>::mask();
+			register data_t datahi_clocklo = FastPin<DATA_PIN>::hival() & ~FastPin<CLOCK_PIN>::mask();
+			register data_t datalo_clocklo = FastPin<DATA_PIN>::loval() & ~FastPin<CLOCK_PIN>::mask();
 			
 			uint8_t *end = data + len;
 
 			while(data != end) { 
 				writeByte(D::adjust(*data++), datapin, datahi_clockhi, datalo_clockhi, datahi_clocklo, datalo_clocklo);
 			}
+			FastPin<CLOCK_PIN>::lo();
 		}
 #endif
 		release();	
 	}
 
 	// default version of writing a block of data out to the SPI port, with no data modifications being made
-	static void writeBytes(register uint8_t *data, int len) { writeBytes<DATA_NOP>(data, len); }
+	void writeBytes(register uint8_t *data, int len) { writeBytes<DATA_NOP>(data, len); }
 
 
 	// write a block of uint8_ts out in groups of three.  len is the total number of uint8_ts to write out.  The template
 	// parameters indicate how many uint8_ts to skip at the beginning of each grouping, as well as a class specifying a per
 	// byte of data modification to be made.  (See DATA_NOP above)
-	template <uint8_t SKIP, class D> static void writeBytes3(register uint8_t *data, int len) { 
-		latch();
+	template <uint8_t SKIP, class D> void writeBytes3(register uint8_t *data, int len) { 
+		select();
 
-#if 0
+#ifdef FAST_SPI_INTERRUPTS_WRITE_PINS
 		// If interrupts or other things may be generating output while we're working on things, then we need
 		// to use this block
 		uint8_t *end = data + len;
 		while(data != end) { 
-			data += SKIP;
+			data += (MASK_SKIP_BITS & SKIP);
+			if(SKIP & FLAG_START_BIT) { 
+				writeBit<0>(1);
+			}
 			writeByte(D::adjust(*data++));
 			writeByte(D::adjust(*data++));
 			writeByte(D::adjust(*data++));
@@ -342,20 +359,23 @@ public:
 #else
 		// If we can guaruntee that no one else will be writing data while we are running (namely, changing the values of the PORT/PDOR pins)
 		// then we can use a bunch of optimizations in here
-		register clock_ptr_t clockpin = Pin<CLOCK_PIN>::port();
-		register data_ptr_t datapin = Pin<DATA_PIN>::port();
+		register clock_ptr_t clockpin = FastPin<CLOCK_PIN>::port();
+		register data_ptr_t datapin = FastPin<DATA_PIN>::port();
 
-		if(Pin<DATA_PIN>::port() != Pin<CLOCK_PIN>::port()) {
+		if(FastPin<DATA_PIN>::port() != FastPin<CLOCK_PIN>::port()) {
 			// If data and clock are on different ports, then writing a bit will consist of writing the value foor
 			// the bit (hi or low) to the data pin port, and then two writes to the clock port to strobe the clock line
-			register data_t datahi = Pin<DATA_PIN>::hival();
-			register data_t datalo = Pin<DATA_PIN>::loval();
-			register clock_t clockhi = Pin<CLOCK_PIN>::hival();
-			register clock_t clocklo = Pin<CLOCK_PIN>::loval();
+			register data_t datahi = FastPin<DATA_PIN>::hival();
+			register data_t datalo = FastPin<DATA_PIN>::loval();
+			register clock_t clockhi = FastPin<CLOCK_PIN>::hival();
+			register clock_t clocklo = FastPin<CLOCK_PIN>::loval();
 			uint8_t *end = data + len;
 
 			while(data != end) { 
-				data += SKIP;
+				data += (MASK_SKIP_BITS & SKIP);
+				if(SKIP & FLAG_START_BIT) { 
+					writeBit<0>(1, clockpin, datapin, datahi, datalo, clockhi, clocklo);
+				}
 				writeByte(D::adjust(*data++), clockpin, datapin, datahi, datalo, clockhi, clocklo);
 				writeByte(D::adjust(*data++), clockpin, datapin, datahi, datalo, clockhi, clocklo);
 				writeByte(D::adjust(*data++), clockpin, datapin, datahi, datalo, clockhi, clocklo);
@@ -363,27 +383,32 @@ public:
 
 		} else {
 			// If data and clock are on the same port then we can combine setting the data and clock pins 
-			register data_t datahi_clockhi = Pin<DATA_PIN>::hival() | Pin<CLOCK_PIN>::mask();
-			register data_t datalo_clockhi = Pin<DATA_PIN>::loval() | Pin<CLOCK_PIN>::mask();
-			register data_t datahi_clocklo = Pin<DATA_PIN>::hival() & ~Pin<CLOCK_PIN>::mask();
-			register data_t datalo_clocklo = Pin<DATA_PIN>::loval() & ~Pin<CLOCK_PIN>::mask();
+			FastPin<CLOCK_PIN>::hi();
+			register data_t datahi_clockhi = FastPin<DATA_PIN>::hival() | FastPin<CLOCK_PIN>::mask();
+			register data_t datalo_clockhi = FastPin<DATA_PIN>::loval() | FastPin<CLOCK_PIN>::mask();
+			register data_t datahi_clocklo = FastPin<DATA_PIN>::hival() & ~FastPin<CLOCK_PIN>::mask();
+			register data_t datalo_clocklo = FastPin<DATA_PIN>::loval() & ~FastPin<CLOCK_PIN>::mask();
 			
 			uint8_t *end = data + len;
 
 			while(data != end) { 
-				data += SKIP;
+				data += (MASK_SKIP_BITS & SKIP);
+				if(SKIP & FLAG_START_BIT) { 
+					writeBit<0>(1, datapin, datahi_clockhi, datalo_clockhi, datahi_clocklo, datalo_clocklo);
+				}
 				writeByte(D::adjust(*data++), datapin, datahi_clockhi, datalo_clockhi, datahi_clocklo, datalo_clocklo);
 				writeByte(D::adjust(*data++), datapin, datahi_clockhi, datalo_clockhi, datahi_clocklo, datalo_clocklo);
 				writeByte(D::adjust(*data++), datapin, datahi_clockhi, datalo_clockhi, datahi_clocklo, datalo_clocklo);
 			}
+			FastPin<CLOCK_PIN>::lo();
 		}	
 #endif
 		release();
 	}
 
-	template <uint8_t SKIP> static void writeBytes3(register uint8_t *data, int len) { writeBytes3<SKIP, DATA_NOP>(data, len); }
-	template <class D> static void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, D>(data, len); }
-	static void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, DATA_NOP>(data, len); }
+	template <uint8_t SKIP> void writeBytes3(register uint8_t *data, int len) { writeBytes3<SKIP, DATA_NOP>(data, len); }
+	template <class D> void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, D>(data, len); }
+	void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, DATA_NOP>(data, len); }
 };
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -397,16 +422,20 @@ public:
 // uno/mini/duemilanove
 #if defined(__AVR_ATmega328P__) || defined(__AVR_ATmega168__)
 
-template <uint8_t _DATA_PIN, uint8_t _CLOCK_PIN, uint8_t _LATCH_PIN, uint8_t _SPI_SPEED>
+template <uint8_t _DATA_PIN, uint8_t _CLOCK_PIN, uint8_t _SPI_SPEED>
 class AVRUSARTSPIOutput { 
+	Selectable *m_pSelect;
 public:
-	static void init() { 
-		Pin<_LATCH_PIN>::setOutput();
+	AVRUSARTSPIOutput() { m_pSelect = NULL; }
+	AVRUSARTSPIOutput(Selectable *pSelect) { m_pSelect = pSelect; }
+	void setSelect(Selectable *pSelect) { m_pSelect = pSelect; }
+
+	void init() { 
 		UBRR0 = 0;
 		UCSR0A = 1<<TXC0;
 
-		Pin<_CLOCK_PIN>::setOutput();
-		Pin<_DATA_PIN>::setOutput();
+		FastPin<_CLOCK_PIN>::setOutput();
+		FastPin<_DATA_PIN>::setOutput();
 
 		UCSR0C = _BV (UMSEL00) | _BV (UMSEL01);  // Master SPI mode
 		UCSR0B = _BV (TXEN0) | _BV (RXEN0);  // transmit enable and receive enable
@@ -425,24 +454,24 @@ public:
 
 	template <uint8_t BIT> inline static void writeBit(uint8_t b) { 
 		if(b && (1 << BIT)) { 
-			Pin<_DATA_PIN>::hi();
+			FastPin<_DATA_PIN>::hi();
 		} else { 
-			Pin<_DATA_PIN>::lo();
+			FastPin<_DATA_PIN>::lo();
 		}
 
-		Pin<_CLOCK_PIN>::hi();
-		Pin<_CLOCK_PIN>::lo();
+		FastPin<_CLOCK_PIN>::hi();
+		FastPin<_CLOCK_PIN>::lo();
 	}
 
-	static void latch() { Pin<_LATCH_PIN>::lo(); }
-	static void release() { 
+	void select() { if(m_pSelect != NULL) { m_pSelect->select(); } } // FastPin<_SELECT_PIN>::hi(); }
+	void release() { 
 		// wait for all transmissions to finish
   		while ((UCSR0A & (1 <<TXC0)) == 0) {}
-    	Pin<_LATCH_PIN>::hi(); 
+    	if(m_pSelect != NULL) { m_pSelect->release(); } // FastPin<_SELECT_PIN>::hi(); 
 	}
 
-	static void writeBytesValue(uint8_t value, int len) { 
-		latch();
+	void writeBytesValue(uint8_t value, int len) { 
+		select();
 		while(len--) { 
 			writeByte(value);
 		}
@@ -450,9 +479,9 @@ public:
 	}
 	
 	// Write a block of n uint8_ts out 
-	template <class D> static void writeBytes(register uint8_t *data, int len) { 
+	template <class D> void writeBytes(register uint8_t *data, int len) { 
 		uint8_t *end = data + len;
-		latch();
+		select();
 		while(data != end) { 
 #if defined(__MK20DX128__) 
 			writeByte(D::adjust(*data++));
@@ -464,15 +493,15 @@ public:
 		release();	
 	}
 
-	static void writeBytes(register uint8_t *data, int len) { writeBytes<DATA_NOP>(data, len); }
+	void writeBytes(register uint8_t *data, int len) { writeBytes<DATA_NOP>(data, len); }
 
 	// write a block of uint8_ts out in groups of three.  len is the total number of uint8_ts to write out.  The template
 	// parameters indicate how many uint8_ts to skip at the beginning and/or end of each grouping
-	template <uint8_t SKIP, class D> static void writeBytes3(register uint8_t *data, int len) { 
+	template <uint8_t SKIP, class D> void writeBytes3(register uint8_t *data, int len) { 
 		uint8_t *end = data + len;
-		latch();
+		select();
 		while(data != end) { 
-			data += SKIP;
+			data += (MASK_SKIP_BITS & SKIP);
 #if defined(__MK20DX128__) 
 			writeByte(D::adjust(*data++));
 			writeByte(D::adjust(*data++));
@@ -487,9 +516,9 @@ public:
 		release();
 	}
 
-	template <uint8_t SKIP> static void writeBytes3(register uint8_t *data, int len) { writeBytes3<SKIP, DATA_NOP>(data, len); }
-	template <class D> static void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, D>(data, len); }
-	static void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, DATA_NOP>(data, len); }
+	template <uint8_t SKIP> void writeBytes3(register uint8_t *data, int len) { writeBytes3<SKIP, DATA_NOP>(data, len); }
+	template <class D> void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, D>(data, len); }
+	void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, DATA_NOP>(data, len); }
 
 };
 
@@ -505,16 +534,20 @@ public:
 //
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <uint8_t _DATA_PIN, uint8_t _CLOCK_PIN, uint8_t _LATCH_PIN, uint8_t _SPI_SPEED>
+template <uint8_t _DATA_PIN, uint8_t _CLOCK_PIN, uint8_t _SPI_SPEED>
 class AVRHardwareSPIOutput { 
+	Selectable *m_pSelect;
 public:
-	static void init() {
+	AVRHardwareSPIOutput() { m_pSelect = NULL; }
+	AVRHardwareSPIOutput(Selectable *pSelect) { m_pSelect = pSelect; }
+	void setSelect(Selectable *pSelect) { m_pSelect = pSelect; }
+
+	void init() {
 		uint8_t clr;
 
 		// set the pins to output
-		Pin<_DATA_PIN>::setOutput();
-		Pin<_LATCH_PIN>::setOutput();
-		Pin<_CLOCK_PIN>::setOutput();
+		FastPin<_DATA_PIN>::setOutput();
+		FastPin<_CLOCK_PIN>::setOutput();
 		release();
 
 		SPCR |= ((1<<SPE) | (1<<MSTR) ); 		// enable SPI as master
@@ -547,7 +580,7 @@ public:
 	    else { SPSR &= ~ (1<<SPI2X); }
 
 	    // push 192 0s to prime the spi stuff
-	    latch();
+	    select();
 	    SPDR = 0;
 	    for(int i = 0; i < 191; i++) { 
 	    	writeByte(0); writeByte(0); writeByte(0);
@@ -558,36 +591,37 @@ public:
 	static void wait() __attribute__((always_inline)) { while(!(SPSR & (1<<SPIF))); }
 
 	static void writeByte(uint8_t b) __attribute__((always_inline)) { wait(); SPDR=b; }
+	static void writeBytePostWait(uint8_t b) __attribute__((always_inline)) { SPDR=b; wait(); }
 	static void writeByteNoWait(uint8_t b) __attribute__((always_inline)) { SPDR=b; }
 
 	template <uint8_t BIT> inline static void writeBit(uint8_t b) { 
 		SPCR &= ~(1 << SPE);
 		if(b & (1 << BIT)) { 
-			Pin<_DATA_PIN>::hi();
+			FastPin<_DATA_PIN>::hi();
 		} else { 
-			Pin<_DATA_PIN>::lo();
+			FastPin<_DATA_PIN>::lo();
 		}
 
-		Pin<_CLOCK_PIN>::hi();
-		Pin<_CLOCK_PIN>::lo();
+		FastPin<_CLOCK_PIN>::hi();
+		FastPin<_CLOCK_PIN>::lo();
 		SPCR |= 1 << SPE;
 	}
 
-	static void latch() { Pin<_LATCH_PIN>::lo(); }
-	static void release() { Pin<_LATCH_PIN>::hi(); }
+	void select() { if(m_pSelect != NULL) { m_pSelect->select(); } } // FastPin<_SELECT_PIN>::hi(); }
+	void release() { if(m_pSelect != NULL) { m_pSelect->release(); } } // FastPin<_SELECT_PIN>::lo(); }
 
-	static void writeBytesValue(uint8_t value, int len) { 
-		latch();
+	void writeBytesValue(uint8_t value, int len) { 
+		select();
 		while(len--) { 
-			writeByte(value);
+			writeBytePostWait(value);
 		}
 		release();
 	}
 	
 	// Write a block of n uint8_ts out 
-	template <class D> static void writeBytes(register uint8_t *data, int len) { 
+	template <class D> void writeBytes(register uint8_t *data, int len) { 
 		uint8_t *end = data + len;
-		latch();
+		select();
 		while(data != end) { 
 #if defined(__MK20DX128__) 
 			writeByte(D::adjust(*data++));
@@ -599,25 +633,32 @@ public:
 		release();	
 	}
 
-	static void writeBytes(register uint8_t *data, int len) { writeBytes<DATA_NOP>(data, len); }
+	void writeBytes(register uint8_t *data, int len) { writeBytes<DATA_NOP>(data, len); }
 
 	// write a block of uint8_ts out in groups of three.  len is the total number of uint8_ts to write out.  The template
 	// parameters indicate how many uint8_ts to skip at the beginning and/or end of each grouping
-	template <uint8_t SKIP, class D> static void writeBytes3(register uint8_t *data, int len) { 
+	template <uint8_t SKIP, class D> void writeBytes3(register uint8_t *data, int len) { 
 		uint8_t *end = data + len;
-		latch();
+		select();
 		while(data != end) { 
-			data += SKIP;
+			data += (MASK_SKIP_BITS & SKIP);
+			if(SKIP & FLAG_START_BIT) { 
+				writeBit<0>(1);
+			}
 #if defined(__MK20DX128__) 
 			writeByte(D::adjust(*data++));
 			writeByte(D::adjust(*data++));
 			writeByte(D::adjust(*data++));
 #else 
 			// a slight touch of delay here helps optimize the timing of the status register check loop (not used on ARM)
-			if(_SPI_SPEED == 0) { 
+			if(false && _SPI_SPEED == 0) { 
 				writeByteNoWait(D::adjust(*data++)); delaycycles<13>();
 				writeByteNoWait(D::adjust(*data++)); delaycycles<13>();
 				writeByteNoWait(D::adjust(*data++)); delaycycles<9>();
+			} else if(SKIP & FLAG_START_BIT) { 
+				writeBytePostWait(D::adjust(*data++));
+				writeBytePostWait(D::adjust(*data++));
+				writeBytePostWait(D::adjust(*data++));
 			} else { 
 				writeByte(D::adjust(*data++)); delaycycles<3>();
 				writeByte(D::adjust(*data++)); delaycycles<3>();
@@ -628,9 +669,9 @@ public:
 		release();
 	}
 
-	template <uint8_t SKIP> static void writeBytes3(register uint8_t *data, int len) { writeBytes3<SKIP, DATA_NOP>(data, len); }
-	template <class D> static void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, D>(data, len); }
-	static void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, DATA_NOP>(data, len); }
+	template <uint8_t SKIP> void writeBytes3(register uint8_t *data, int len) { writeBytes3<SKIP, DATA_NOP>(data, len); }
+	template <class D> void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, D>(data, len); }
+	void writeBytes3(register uint8_t *data, int len) { writeBytes3<0, DATA_NOP>(data, len); }
 
 };
 
@@ -651,36 +692,31 @@ public:
 //
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<uint8_t _DATA_PIN, uint8_t _CLOCK_PIN, uint8_t _LATCH_PIN, uint8_t _SPI_SPEED>
-class AVRSPIOutput : public AVRSoftwareSPIOutput<_DATA_PIN, _CLOCK_PIN, _LATCH_PIN, _SPI_SPEED> {};
+template<uint8_t _DATA_PIN, uint8_t _CLOCK_PIN, uint8_t _SPI_SPEED>
+class SPIOutput : public AVRSoftwareSPIOutput<_DATA_PIN, _CLOCK_PIN, _SPI_SPEED> {};
 
-// uno/mini/duemilanove
-#if defined(__AVR_ATmega328P__) || defined(__AVR_ATmega168__)
-#define SPI_DATA 11
-#define SPI_CLOCK 13
-template<uint8_t _LATCH, uint8_t SPI_SPEED>
-class AVRSPIOutput<SPI_DATA, SPI_CLOCK, _LATCH, SPI_SPEED> : public AVRHardwareSPIOutput<SPI_DATA, SPI_CLOCK, _LATCH, SPI_SPEED> {};
+template<uint8_t _DATA_PIN, uint8_t _CLOCK_PIN, uint8_t _SPI_SPEED>
+class SoftwareSPIOutput : public AVRSoftwareSPIOutput<_DATA_PIN, _CLOCK_PIN, _SPI_SPEED> {};
 
-// #define USART_DATA 0
-// #define USART_CLOCK 4
-// template<uint8_t _LATCH, uint8_t SPI_SPEED>
-// class AVRSPIOutput<USART_DATA, USART_CLOCK, _LATCH, SPI_SPEED> : public AVRUSARTSPIOutput<USART_DATA, USART_CLOCK, _LATCH, SPI_SPEED> {};
+#ifndef FORCE_SOFTWARE_SPI
+#if defined(SPI_DATA) && defined(SPI_CLOCK)
 
-// Leonardo, teensy, blinkm
-#elif defined(__AVR_ATmega32U4__)
-#define SPI_DATA 2
-#define SPI_CLOCK 1
-template<uint8_t _LATCH, uint8_t SPI_SPEED>
-class AVRSPIOutput<SPI_DATA, SPI_CLOCK, _LATCH, SPI_SPEED> : public AVRHardwareSPIOutput<SPI_DATA, SPI_CLOCK, _LATCH, SPI_SPEED> {};
+template<uint8_t SPI_SPEED>
+class SPIOutput<SPI_DATA, SPI_CLOCK, SPI_SPEED> : public AVRHardwareSPIOutput<SPI_DATA, SPI_CLOCK, SPI_SPEED> {};
 
-#elif defined(__MK20DX128__)   // for Teensy 3.0
-#define SPI_DATA 11
-#define SPI_CLOCK 13
-template<uint8_t _LATCH, uint8_t SPI_SPEED>
-class AVRSPIOutput<SPI_DATA, SPI_CLOCK, _LATCH, SPI_SPEED> : public AVRHardwareSPIOutput<SPI_DATA, SPI_CLOCK, _LATCH, SPI_SPEED> {};
 
 #else
-#pragma message "No hardware SPI pins defined.  All SPI access will default to bitbanged output"
+#warning "No hardware SPI pins defined.  All SPI access will default to bitbanged output"
+
 #endif
+
+// #if defined(USART_DATA) && defined(USART_CLOCK)
+// template<uint8_t SPI_SPEED>
+// class AVRSPIOutput<USART_DATA, USART_CLOCK, SPI_SPEED> : public AVRUSARTSPIOutput<USART_DATA, USART_CLOCK, SPI_SPEED> {};
+// #endif
+
+#else
+#warning "Forcing software SPI - no hardware SPI for you!"
+#endif 
 
 #endif
