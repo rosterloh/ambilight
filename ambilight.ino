@@ -19,7 +19,7 @@ void setup()
   
   // Start with all LEDs off
   memset(leds, 0, NUM_LEDS * sizeof(struct CRGB));
-  LEDs.show();
+  LEDS.show();
   
   Serial.begin(serialRate);
 }
@@ -44,7 +44,7 @@ void loop() {
     g = Serial.read();
     while(!Serial.available());
     b = Serial.read();
-    if(!(i % EVERY_NTH)) {
+    if(!(iLed % EVERY_NTH)) {
       leds[iLed].r = r;
       leds[iLed].g = g;
       leds[iLed].b = b;
