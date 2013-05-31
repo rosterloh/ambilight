@@ -1,12 +1,11 @@
-#include "FastSPI_LED2.h"
+#include <FastSPI_LED2.h>
 
 #define NUM_LEDS 60
-
-struct CRGB { byte g; byte r; byte b; };
+#define DATA_PIN 4
+// If its's too bright with all the LEDS you can skip every nth led
+#define EVERY_NTH 1
 
 struct CRGB leds[NUM_LEDS];
-
-WS2811Controller800Mhz<4> LED;
 
 // specified under `rate` in the `[device]` section of /etc/boblight.conf
 #define serialRate 115200
@@ -16,11 +15,11 @@ uint8_t prefix[] = {0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA};
 
 void setup()
 {
-  LED.init();
+  LEDS.addLeds<WS2811, DATA_PIN>(leds, NUM_LEDS);
   
   // Start with all LEDs off
-  memset(leds, 0, NUM_LEDS * 3);
-  LED.showRGB((byte*)leds, NUM_LEDS);;
+  memset(leds, 0, NUM_LEDS * sizeof(struct CRGB));
+  LEDs.show();
   
   Serial.begin(serialRate);
 }
@@ -35,9 +34,9 @@ void loop() {
     i = 0;
     goto waitLoop;
   }
-  memset(leds, 0, NUM_LEDS * 3);
+  memset(leds, 0,  NUM_LEDS * sizeof(struct CRGB));
   // read the transmitted data
-  for (int i = 0; i < NUM_LEDS; i++) {
+  for (int iLed = 0; iLed < NUM_LEDS; iLed++) {
     byte r, g, b;    
     while(!Serial.available());
     r = Serial.read();
@@ -45,13 +44,12 @@ void loop() {
     g = Serial.read();
     while(!Serial.available());
     b = Serial.read();
-    // For power reasons I will currently discard half the values
-    if(i % 2) {
-      leds[i].r = r;
-      leds[i].g = g;
-      leds[i].b = b;
+    if(!(i % EVERY_NTH)) {
+      leds[iLed].r = r;
+      leds[iLed].g = g;
+      leds[iLed].b = b;
     }
   }
-  LED.showRGB((byte*)leds, NUM_LEDS);;
+  LEDS.show();
 }
 
