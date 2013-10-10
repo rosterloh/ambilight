@@ -1,11 +1,11 @@
 #include <FastSPI_LED2.h>
 
-#define NUM_LEDS 60
+#define NUM_LEDS 91
 #define DATA_PIN 4
 // If its's too bright with all the LEDS you can skip every nth led
 #define EVERY_NTH 1
 
-struct CRGB leds[NUM_LEDS];
+CRGB leds[NUM_LEDS];
 
 // specified under `rate` in the `[device]` section of /etc/boblight.conf
 #define serialRate 115200
@@ -15,7 +15,10 @@ uint8_t prefix[] = {0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA};
 
 void setup()
 {
-  LEDS.addLeds<WS2811, DATA_PIN>(leds, NUM_LEDS);
+  // sanity check delay - allows reprogramming if accidently blowing power w/leds
+  delay(2000);
+   
+  LEDS.addLeds<WS2811, DATA_PIN, RGB>(leds, NUM_LEDS);
   
   // Start with all LEDs off
   memset(leds, 0, NUM_LEDS * sizeof(struct CRGB));
