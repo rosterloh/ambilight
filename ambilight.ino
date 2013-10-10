@@ -18,7 +18,7 @@ void setup()
   // sanity check delay - allows reprogramming if accidently blowing power w/leds
   delay(2000);
    
-  LEDS.addLeds<WS2811, DATA_PIN, RGB>(leds, NUM_LEDS);
+  LEDS.addLeds<WS2811, DATA_PIN, GRB>(leds, NUM_LEDS);
   
   // Start with all LEDs off
   memset(leds, 0, NUM_LEDS * sizeof(struct CRGB));
